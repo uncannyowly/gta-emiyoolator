@@ -1,0 +1,8 @@
+# Builds box86 for the Miyoo Mini: the gta1-miyoo toolchain image (GCC 8.3,
+# glibc 2.28, Cortex-A7 hard float) plus the tools box86's build needs.
+# The base image comes from ../gta1-miyoo (scripts/build-miyoo.sh builds it).
+FROM gta1-miyoo-toolchain
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		cmake python3 git \
+	&& rm -rf /var/lib/apt/lists/*

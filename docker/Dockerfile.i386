@@ -1,0 +1,7 @@
+# 32-bit x86 Debian (glibc 2.36) to build gtashell: the binary box86 runs on
+# the Mini. Old enough that every libc symbol it uses is one box86 wraps.
+FROM --platform=linux/386 debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		gcc libc6-dev make gdb file \
+	&& rm -rf /var/lib/apt/lists/*
