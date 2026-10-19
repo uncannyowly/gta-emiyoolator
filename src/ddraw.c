@@ -61,8 +61,8 @@ typedef struct Surf {
 	int w, h, bpp, pitch;
 	uint8_t *mem;
 	DWORD caps;
-	struct Surf *back;   /* primary: its back buffer */
-	struct Surf *front;  /* back buffer: its primary */
+	struct Surf *back;   /* the next surface in a flip chain (primary -> back buffer -> ...) */
+	struct Surf *front;  /* back buffers: the chain's primary */
 	Pal *pal;
 	DWORD ck_lo, ck_hi;
 	int has_ck;
@@ -77,6 +77,13 @@ typedef struct {
 static int mode_w = 640, mode_h = 480, mode_bpp = 16;
 static Surf *primary;
 static uint32_t frames;
+
+/* ---- call statistics (stats=1 in the ini): which surface does what ----------- */
+
+enum { ST_LOCK, ST_UNLOCK, ST_FLIP, ST_BLT, ST_BLTFAST, ST_N };
+static unsigned stat_count[3][ST_N];   /* primary, back buffer, other */
+
+static void stat(const struct Surf *s, int what);
 
 /* ---- presenting ------------------------------------------------------------- */
 
@@ -120,7 +127,12 @@ static void fill_desc(uint8_t *d, const Surf *s, const RECT *r)
 	*(DWORD *)(d + SD_HEIGHT) = (DWORD)s->h;
 	*(DWORD *)(d + SD_WIDTH) = (DWORD)s->w;
 	*(LONG *)(d + SD_PITCH) = s->pitch;
-	*(DWORD *)(d + SD_BACKBUFFERS) = s->back ? 1 : 0;
+	{
+		DWORD n = 0;
+		for (const struct Surf *b = s->front ? NULL : s->back; b; b = b->back)
+			n++;
+		*(DWORD *)(d + SD_BACKBUFFERS) = n;
+	}
 	if (r)
 		mem += r->top * s->pitch + r->left * (s->bpp / 8);
 	*(uint32_t *)(d + SD_SURFACE) = (uint32_t)(uintptr_t)mem;
@@ -198,6 +210,21 @@ static Obj *new_clipper(void)
 
 static const void *const surf_vtbl[];
 
+static void stat(const Surf *s, int what)
+{
+	static uint32_t last;
+	int k = s == primary ? 0 : (primary && s == primary->back) ? 1 : 2;
+	if (!config_int("stats", 0))
+		return;
+	stat_count[k][what]++;
+	if (shell_ms() - last >= 3000) {
+		last = shell_ms();
+		for (int i = 0; i < 3; i++)
+			shell_log("ddraw stats %-7s Lock %u Unlock %u Flip %u Blt %u BltFast %u", i == 0 ? "primary" : i == 1 ? "back" : "other",
+			          stat_count[i][0], stat_count[i][1], stat_count[i][2], stat_count[i][3], stat_count[i][4]);
+	}
+}
+
 static Surf *new_surface(int w, int h, int bpp, DWORD caps)
 {
 	Surf *s = calloc(1, sizeof *s);
@@ -233,13 +260,14 @@ static DWORD WINAPI s_Release(Surf *s)
 {
 	if (--s->refs > 0)
 		return (DWORD)s->refs;
+	if (s->front)
+		return 0;   /* a back buffer belongs to its chain: freed with the primary */
 	if (s == primary)
 		primary = NULL;
-	if (s->back && s->back->front == s)
-		s->back->front = NULL;
-	if (s->front && s->front->back == s) {
-		s->front->back = NULL;
-		return 0;   /* owned by its primary's flip chain memory: free with it */
+	for (Surf *b = s->back, *next; b; b = next) {
+		next = b->back;
+		free(b->mem);
+		free(b);
 	}
 	free(s->mem);
 	free(s);
@@ -303,6 +331,8 @@ static void blit(Surf *dst, RECT d, Surf *src, RECT sr, int keyed)
 	}
 }
 
+/* drawing straight onto the visible surface shows at once; with a flip
+ * chain only Flip shows a frame (MGL also locks the front to find it) */
 static void maybe_present(Surf *s)
 {
 	if (s == primary && !s->back)
@@ -311,6 +341,7 @@ static void maybe_present(Surf *s)
 
 static HRESULT WINAPI s_Blt(Surf *s, RECT *dr, Surf *src, RECT *sr, DWORD flags, const uint8_t *fx)
 {
+	stat(s, ST_BLT);
 	RECT d = dr ? *dr : (RECT){ 0, 0, s->w, s->h };
 	clip_rect(&d, s);
 	if (flags & 0x400) {   /* DDBLT_COLORFILL */
@@ -333,6 +364,7 @@ static HRESULT WINAPI s_BltBatch(Surf *s, void *b, DWORD n, DWORD f) { (void)s; 
 
 static HRESULT WINAPI s_BltFast(Surf *s, DWORD x, DWORD y, Surf *src, RECT *sr, DWORD trans)
 {
+	stat(s, ST_BLTFAST);
 	RECT r = sr ? *sr : (RECT){ 0, 0, src->w, src->h };
 	RECT d = { (LONG)x, (LONG)y, (LONG)x + (r.right - r.left), (LONG)y + (r.bottom - r.top) };
 	blit(s, d, src, r, (trans & 1) && src->has_ck);   /* DDBLTFAST_SRCCOLORKEY */
@@ -358,14 +390,23 @@ static HRESULT WINAPI s_EnumOverlayZOrders(Surf *s, DWORD f, void *c, void *cb) 
 
 static HRESULT WINAPI s_Flip(Surf *s, Surf *target, DWORD flags)
 {
-	Surf *b = target ? target : s->back;
+	stat(s, ST_FLIP);
 	uint8_t *t;
 	(void)flags;
-	if (!b)
+	if (!s->back)
 		return DDERR_NOTFOUND;
 	t = s->mem;
-	s->mem = b->mem;
-	b->mem = t;
+	if (target) {   /* flip to a particular buffer */
+		s->mem = target->mem;
+		target->mem = t;
+	} else {        /* rotate: each buffer takes the next one's memory, the last gets the old front */
+		Surf *b = s;
+		while (b->back) {
+			b->mem = b->back->mem;
+			b = b->back;
+		}
+		b->mem = t;
+	}
 	present(s);
 	return DD_OK;
 }
@@ -416,6 +457,7 @@ static HRESULT WINAPI s_IsLost(Surf *s) { (void)s; return DD_OK; }
 
 static HRESULT WINAPI s_Lock(Surf *s, RECT *r, uint8_t *d, DWORD flags, HANDLE ev)
 {
+	stat(s, ST_LOCK);
 	(void)flags; (void)ev;
 	fill_desc(d, s, r);
 	return DD_OK;
@@ -453,6 +495,7 @@ static HRESULT WINAPI s_SetPalette(Surf *s, Pal *p)
 
 static HRESULT WINAPI s_Unlock(Surf *s, void *p)
 {
+	stat(s, ST_UNLOCK);
 	(void)p;
 	maybe_present(s);
 	return DD_OK;
@@ -527,15 +570,21 @@ static HRESULT WINAPI dd_CreateSurface(Obj *o, const uint8_t *d, Surf **out, voi
 	}
 	s = new_surface(w, h, bpp, caps | (caps & DDSCAPS_PRIMARYSURFACE ? DDSCAPS_FRONTBUFFER | DDSCAPS_VISIBLE : 0));
 	if (caps & DDSCAPS_PRIMARYSURFACE) {
+		DWORD n = (flags & DDSD_BACKBUFFERCOUNT) ? *(const DWORD *)(d + SD_BACKBUFFERS) : 0;
+		Surf *last = s;
 		primary = s;
-		if ((flags & DDSD_BACKBUFFERCOUNT) && *(const DWORD *)(d + SD_BACKBUFFERS) > 0) {
-			Surf *b = new_surface(w, h, bpp, DDSCAPS_BACKBUFFER | (caps & (DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VIDEOMEMORY)));
-			s->back = b;
+		/* the first back buffer has DDSCAPS_BACKBUFFER, later ones only FLIP */
+		for (DWORD i = 0; i < n && i < 8; i++) {
+			Surf *b = new_surface(w, h, bpp, (i == 0 ? DDSCAPS_BACKBUFFER : 0) |
+			                      (caps & (DDSCAPS_FLIP | DDSCAPS_COMPLEX | DDSCAPS_VIDEOMEMORY)));
 			b->front = s;
+			last->back = b;
+			last = b;
 		}
+		shell_log("ddraw: CreateSurface %dx%d %d bpp caps 0x%x (primary) + %u back buffer(s)", w, h, bpp, caps, n);
+	} else {
+		shell_log("ddraw: CreateSurface %dx%d %d bpp caps 0x%x", w, h, bpp, caps);
 	}
-	shell_log("ddraw: CreateSurface %dx%d %d bpp caps 0x%x%s%s", w, h, bpp, caps,
-	          s == primary ? " (primary)" : "", s->back ? " + back buffer" : "");
 	*out = s;
 	return DD_OK;
 }

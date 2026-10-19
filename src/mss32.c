@@ -104,7 +104,17 @@ static DWORD WINAPI ail_ms_count(void) { return shell_ms(); }
 static int driver_dummy;
 
 static LONG WINAPI ail_startup(void) { shell_log("AIL_startup"); return 1; }
-static void WINAPI ail_shutdown(void) { mss32_shutdown(); }
+/* the game shuts Miles down and starts it again between front end and levels:
+ * release the timers that exist, but later ones must still run */
+static void WINAPI ail_shutdown(void)
+{
+	for (int t = 0; t < MAX_TIMERS; t++)
+		if (timers[t].alive) {
+			timers[t].running = 0;
+			timers[t].alive = 0;
+			pthread_join(timers[t].thread, NULL);
+		}
+}
 static LONG WINAPI ail_set_preference(DWORD n, LONG v) { (void)n; (void)v; return 0; }
 
 static LONG WINAPI ail_waveOutOpen(void **drv, void **wave, LONG dev, const void *fmt)
