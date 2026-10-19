@@ -9,7 +9,9 @@ Needs, in this folder: WINO/Grand Theft Auto.exe and GTADATA (your own copy of
 the game). Music is read from ../GTA1/Music (see gtashell.ini).
 
 Buttons (change them in gtashell.ini):
-  D-pad   turn left/right, forwards, backwards (the original "rotate" controls)
+  D-pad   on foot: walk the way you press (8 directions); in a car: steer,
+          accelerate, brake/reverse (direct = 0 in gtashell.ini restores the
+          original "rotate" controls on foot)
   A       attack                B   brake / handbrake
   Y       enter/exit vehicle, menu select
   X       special               L1/R1  previous/next weapon

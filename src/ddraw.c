@@ -85,6 +85,12 @@ static unsigned stat_count[3][ST_N];   /* primary, back buffer, other */
 
 static void stat(const struct Surf *s, int what);
 
+/* in a level: gameplay draws through a flip chain, the front end does not */
+int ddraw_in_level(void)
+{
+	return primary && primary->back;
+}
+
 /* ---- presenting ------------------------------------------------------------- */
 
 static void present(Surf *s)
