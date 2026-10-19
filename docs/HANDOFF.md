@@ -40,6 +40,7 @@ box86 builds with `-DRPI2=1 -DARM_DYNAREC=ON` (Cortex-A7, NEON VFPv4, hard
 float) against the Mini toolchain's glibc 2.28.
 
 ```sh
+scripts/build-audio.sh      # gtaaudio (native ARM MI_AO player) -> build/gtaaudio
 scripts/build-shell.sh      # gtashell (32-bit x86, Debian i386 container) -> build/gtashell
 ./build/gtashell build/run/desktop.ini        # run on the PC (video = sdl2 for a window)
 scripts/deploy-sd.sh /run/media/$USER/E010-96EB "/path/to/Grand Theft Auto"
@@ -132,13 +133,21 @@ gdb); on the Mini it runs under box86, which runs libc natively.
       position, 16.16 with 64 units per block in the high word). "In a level" =
       DirectDraw primary has a flip chain (`ddraw_in_level`). `watch = 1|2` in
       the ini logs these fields for further research.
-- [ ] Sound and music (Miles samples/streams are silent stubs: samples report
-      done at once, streams "play" until closed). Plan: own mixer in gtashell +
-      SDL 1.2 audio (box86 wraps the card's native `miyoo/lib/libSDL-1.2.so.0`).
-- [ ] Intro movie (Smacker: SmackOpen returns NULL, the game skips it).
-- [ ] Speed tuning if needed: the frame limiter (0x47dc80) busy-waits a whole
-      core; patch it to sleep. Present converts RGB565→XRGB with rotation in
-      emulated code (~307k pixels per frame).
+- [x] **Sound and music (0.3.0)**, pending a hardware listen. `src/mss32.c`
+      implements Miles samples (game memory, format/rate/volume/pan/loops) and
+      streams (TrackN.wav: pause, volume, loops, byte positions the radio uses
+      to resume) and mixes 22050 Hz stereo on a thread. Output is a pipe into
+      `audio_cmd`: on the Mini the native helper `build/gtaaudio`
+      (`tools/gtaaudio.c`, `scripts/build-audio.sh`, MI_AO code from
+      ../gta1-miyoo; its stderr lands in launch.log). launch.sh kills the
+      audioserver. Desktop check: `audio_wav = file` records the mix; a
+      cross-correlation against the tracks found the car radio's Track2 at
+      61 s (0.61 vs ~0.19 others), i.e. right speed and format. box86 fork/exec
+      of the helper verified under ARM emulation.
+- [x] Frame limiter patched to sleep (`patch_exe` in pe.c, `patch_spin = 0`
+      disables): CPU 16 s → 3.2 s per 25 s of play on the PC, same 23.3 fps.
+- [ ] Intro movie (not wanted by the user).
+- [ ] Exit segfault under box86 after a clean exit.
 
 ## Things learned the hard way (keep)
 

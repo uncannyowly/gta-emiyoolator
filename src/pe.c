@@ -11,6 +11,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/mman.h>
+#include <time.h>
 
 uint8_t *image_base;
 static uint32_t entry_rva, rsrc_rva, rsrc_size;
@@ -77,6 +78,8 @@ static void __attribute__((used, cdecl)) missing_called(int index)
 {
 	shell_fatal("the exe called %s, which gtashell does not provide yet", missing_names[index]);
 }
+
+static void patch_exe(void);
 
 static void *missing_stub(const char *dll, const char *name, int ordinal)
 {
@@ -188,7 +191,46 @@ int pe_load(const char *path)
 		}
 	}
 	shell_log("pe: %s loaded, %d imports provided, %d not yet", path, resolved, stubbed);
+	patch_exe();
 	return 0;
+}
+
+/* ---- patches --------------------------------------------------------------------- */
+
+/* The frame limiter (0x47dc80) spins "cmp [0x775580], eax; jb" until the 70 Hz
+ * timer has counted eax ticks, burning a whole core the Mini needs for sound.
+ * The loop becomes a call to wait_ticks, which sleeps in small steps instead;
+ * applied only when the bytes are exactly the expected ones. */
+static void __attribute__((used, cdecl)) wait_ticks(uint32_t target)
+{
+	struct timespec ts = { 0, 500000 };
+	while (*(volatile uint32_t *)(uintptr_t)0x775580 < target)
+		nanosleep(&ts, NULL);
+}
+
+__asm__(".text\n"
+        "wait_ticks_stub:\n"
+        "\tpush %eax\n\tpush %ecx\n\tpush %edx\n"
+        "\tpush %eax\n\tcall wait_ticks\n\tadd $4, %esp\n"
+        "\tpop %edx\n\tpop %ecx\n\tpop %eax\n\tret\n");
+extern char wait_ticks_stub[];
+
+static void patch_exe(void)
+{
+	static const uint8_t spin[8] = { 0x39, 0x05, 0x80, 0x55, 0x77, 0x00, 0x72, 0xF8 };
+	uint8_t *p = image_base + (0x47dc96 - IMAGE_BASE);
+	int32_t rel;
+	if (!config_int("patch_spin", 1))
+		return;
+	if (memcmp(p, spin, sizeof spin) != 0) {
+		shell_log("pe: frame limiter not where expected, left as it is");
+		return;
+	}
+	rel = (int32_t)((uintptr_t)wait_ticks_stub - (uintptr_t)(p + 5));
+	p[0] = 0xE8;
+	memcpy(p + 1, &rel, 4);
+	p[5] = p[6] = p[7] = 0x90;
+	shell_log("pe: frame limiter sleeps instead of spinning");
 }
 
 uint32_t pe_entry(void)

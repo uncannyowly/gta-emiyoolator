@@ -18,5 +18,6 @@ Buttons (change them in gtashell.ini):
   START   Enter (menus)         SELECT Esc (back, quit menu)
   MENU + START held: quit to OnionOS
 
-Not yet: sound and music (the game runs silently), the intro movie.
+Sound and music play through gtaaudio (the Mini speaker / headphones, at
+OnionOS's volume). Not yet: the intro movie.
 Logs after each run: launch.log and gtashell.log in this folder.

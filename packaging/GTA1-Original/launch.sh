@@ -29,7 +29,9 @@ export LD_LIBRARY_PATH="/mnt/SDCARD/miyoo/lib:/config/lib:/customer/lib:/mnt/SDC
 export BOX86_LOG=1
 export BOX86_NOBANNER=0
 export BOX86_LD_LIBRARY_PATH="$GAMEDIR/x86"
-chmod +x "$GAMEDIR/box86" "$GAMEDIR/gtashell" 2>/dev/null
+chmod +x "$GAMEDIR/box86" "$GAMEDIR/gtashell" "$GAMEDIR/gtaaudio" 2>/dev/null
+# the game drives the audio hardware itself (gtaaudio uses MI_AO)
+pgrep audioserver >/dev/null 2>&1 && killall -9 audioserver 2>/dev/null && sleep 0.2
 
 {
 	echo "=== GTA-eMiYoolator $(cat "$GAMEDIR/VERSION" 2>/dev/null) started $(date) at $FREQ MHz"

@@ -14,13 +14,14 @@ DEST="$SD/Roms/PORTS/Games/GTA1-Original"
 
 [ -d "$SD/Roms/PORTS" ] || { echo "$SD does not look like an OnionOS card" >&2; exit 1; }
 [ -f "$INSTALL/WINO/Grand Theft Auto.exe" ] || { echo "no WINO/Grand Theft Auto.exe in $INSTALL" >&2; exit 1; }
-[ -f "$ROOT/build/box86/box86" ] && [ -f "$ROOT/build/gtashell" ] || { echo "build box86 and gtashell first" >&2; exit 1; }
+[ -f "$ROOT/build/box86/box86" ] && [ -f "$ROOT/build/gtashell" ] && [ -f "$ROOT/build/gtaaudio" ] || { echo "build box86 and gtashell first" >&2; exit 1; }
 
 mkdir -p "$DEST/WINO"
 docker run --rm --user "$(id -u):$(id -g)" -v "$ROOT:/src" -w /src gta-emiyoolator-box86 \
 	arm-linux-gnueabihf-strip -o build/box86/box86.stripped build/box86/box86
 cp -f "$ROOT/build/box86/box86.stripped" "$DEST/box86"
 cp -f "$ROOT/build/gtashell" "$DEST/gtashell"
+cp -f "$ROOT/build/gtaaudio" "$DEST/gtaaudio"
 cp -f "$ROOT/packaging/GTA1-Original/launch.sh" "$ROOT/packaging/GTA1-Original/README.txt" "$DEST/"
 cp -f "$ROOT/VERSION" "$DEST/VERSION"
 if [ -f "$DEST/gtashell.ini" ]; then
