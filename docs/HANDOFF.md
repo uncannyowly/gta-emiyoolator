@@ -39,6 +39,12 @@ scripts/build-box86.sh      # box86 for the Mini -> build/box86/box86 (needs ../
 box86 builds with `-DRPI2=1 -DARM_DYNAREC=ON` (Cortex-A7, NEON VFPv4, hard
 float) against the Mini toolchain's glibc 2.28.
 
+```sh
+scripts/build-shell.sh      # gtashell (32-bit x86, Debian i386 container) -> build/gtashell
+./build/gtashell build/run/desktop.ini        # run on the PC (video = sdl2 for a window)
+scripts/deploy-sd.sh /run/media/$USER/E010-96EB "/path/to/Grand Theft Auto"
+```
+
 ## What the exe needs (recon, 2026-10-19)
 
 - `Grand Theft Auto.exe`: 774 KB, `.text` 677 KB, image base 0x400000,
@@ -96,10 +102,48 @@ gdb); on the Mini it runs under box86, which runs libc natively.
   report "done", real audio later.
 - Settings: values come from `gtashell.ini` (replaces `GTA Settings.exe`).
 
-## Status
+## Status (0.1.0, 2026-10-19)
 
 - [x] Recon of the exe (above).
-- [x] box86 cross-built for the Mini (not yet run on the device).
-- [ ] Shell runs the exe to its title screen on the PC.
-- [ ] Shell + box86 on the Mini: boots, speed and memory measured.
-- [ ] Input, timers, audio, save files.
+- [x] box86 cross-built for the Mini (`scripts/build-box86.sh`, stripped on deploy, 6.5 MB).
+- [x] gtashell runs the original exe on the PC: logos/menu, city select (Liberty
+      City, "1. Gangsta Bang"), gameplay with the original pager brief, at the
+      game's own ~23 fps (70 Hz timer / 3).
+- [x] The same binaries run under box86 on ARM (Docker arm/v7 emulation): full
+      gameplay, 23 fps steady for 5 minutes.
+- [x] Installed on the SD card (`scripts/deploy-sd.sh`): `Roms/PORTS/Games/GTA1-Original`
+      + shortcut `Roms/PORTS/Shortcuts/Action/Grand Theft Auto (Original).port`
+      + box art. Own GTADATA copy (the game writes PLAYER_A.DAT); music read
+      from `../GTA1/Music`. The GTA1 port's files and save were not touched.
+- [ ] **First run on the device** — speed and memory unknown until the user
+      runs it. Logs to read afterwards: `GTA1-Original/launch.log` (box86 +
+      meminfo) and `GTA1-Original/gtashell.log` (fps every 5 s).
+- [ ] Sound and music (Miles samples/streams are silent stubs: samples report
+      done at once, streams "play" until closed). Plan: own mixer in gtashell +
+      SDL 1.2 audio (box86 wraps the card's native `miyoo/lib/libSDL-1.2.so.0`).
+- [ ] Intro movie (Smacker: SmackOpen returns NULL, the game skips it).
+- [ ] Speed tuning if needed: the frame limiter (0x47dc80) busy-waits a whole
+      core; patch it to sleep. Present converts RGB565→XRGB with rotation in
+      emulated code (~307k pixels per frame).
+
+## Things learned the hard way (keep)
+
+- MGL (inside the exe) always loads **WDIR32.DLL** (SciTech WinDirect) and
+  resolves ~45 `_WD_*`/`_PM_*`/`_VF_*` names with GetProcAddress (cdecl):
+  `src/wdir.c` stubs them; `PM_allocRealSeg` must return a buffer.
+- MGL checks `FindFirstFileA("C:\WINDOWS\SYSTEM\ddraw.dll")` before using DirectDraw.
+- MGL looks up `CreateDIBSection`/`SetDIBColorTable` in gdi32 at run time.
+- MGL asks for a primary with **7 back buffers** and walks the chain with
+  EnumAttachedSurfaces (first must carry DDSCAPS_BACKBUFFER) until its count:
+  a short chain loops forever.
+- The game calls AIL_shutdown/AIL_startup between front end and levels; the
+  70 Hz timer registered later must still run (the frame limiter busy-waits
+  on its counter).
+- box86 `modify_ldt` only emulates op 0x11 with entries 7..25 or ≥ 0x1ff0:
+  we use entry 0x1ff0 (selector 0xff87).
+- Build with `-D_FILE_OFFSET_BITS=64`: under box86 the 32-bit `readdir`
+  returns nothing (case-insensitive file lookup broke).
+- Testing: `build/run/*.ini` (desktop, headless, frame dumps, scripted keys
+  in `enter.txt`), `build/armrun/arm.ini` for box86 under
+  `docker run --platform linux/arm/v7 ... ./build/box86/box86 ./build/gtashell ...`.
+  Use a copy of GTADATA (`build/game`): the game writes PLAYER_A.DAT.

@@ -128,13 +128,15 @@ static void setup_fs(void)
 	t[0x24 / 4] = (uint32_t)getpid();
 	t[0x30 / 4] = (uint32_t)(uintptr_t)peb;
 
+	/* op 0x11 and entry 0x1ff0: valid on Linux, and what box86 emulates (it
+	 * maps entries 7..25 and 0x1ff0+ to its own per-thread segment table) */
 	memset(&ud, 0, sizeof ud);
-	ud.entry_number = 0;
+	ud.entry_number = 0x1ff0;
 	ud.base_addr = (unsigned)(uintptr_t)teb;
 	ud.limit = 0xfff;
 	ud.seg_32bit = 1;
 	ud.useable = 1;
-	if (syscall(SYS_modify_ldt, 1, &ud, sizeof ud) != 0)
+	if (syscall(SYS_modify_ldt, 0x11, &ud, sizeof ud) != 0)
 		shell_fatal("modify_ldt failed: cannot give the exe its FS segment");
 	sel = (uint16_t)((ud.entry_number << 3) | 7);   /* LDT, ring 3 */
 	__asm__ volatile("movw %0, %%fs" : : "r"(sel));

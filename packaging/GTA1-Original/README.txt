@@ -1,0 +1,20 @@
+GTA-eMiYoolator - the original Grand Theft Auto (1997) on the Miyoo Mini
+
+This runs the game's own Windows program (WINO/Grand Theft Auto.exe from the
+2002 Rockstar freeware release) through gtashell, which supplies the Windows
+functions it needs, with box86 translating its x86 code for the Mini's ARM CPU.
+Everything you see is the original game.
+
+Needs, in this folder: WINO/Grand Theft Auto.exe and GTADATA (your own copy of
+the game). Music is read from ../GTA1/Music (see gtashell.ini).
+
+Buttons (change them in gtashell.ini):
+  D-pad   turn left/right, forwards, backwards (the original "rotate" controls)
+  A       attack                B   brake / handbrake
+  Y       enter/exit vehicle, menu select
+  X       special               L1/R1  previous/next weapon
+  START   Enter (menus)         SELECT Esc (back, quit menu)
+  MENU + START held: quit to OnionOS
+
+Not yet: sound and music (the game runs silently), the intro movie.
+Logs after each run: launch.log and gtashell.log in this folder.

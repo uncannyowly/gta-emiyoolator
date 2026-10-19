@@ -1,0 +1,17 @@
+#!/bin/sh
+GameName="Grand Theft Auto (Original)"
+GameDir="GTA1-Original"
+GameExecutable="launch.sh"
+GameDataFile="Grand Theft Auto.exe"
+KillAudioserver=1
+PerformanceMode=0
+Arguments=""
+
+unset LD_PRELOAD
+PORTDIR="$(dirname "$0")"
+
+if [ -f "/mnt/SDCARD/Emu/PORTS/launch_standalone.sh" ]; then
+	/mnt/SDCARD/Emu/PORTS/launch_standalone.sh "$GameName" "$GameDir" "$GameExecutable" "$Arguments" "$GameDataFile" "$KillAudioserver" "$PerformanceMode"
+else
+	cd "/mnt/SDCARD/Roms/PORTS/Games/$GameDir" && ./launch.sh
+fi

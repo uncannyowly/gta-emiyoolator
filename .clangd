@@ -1,2 +1,2 @@
 CompileFlags:
-  Add: [-m32, -D_GNU_SOURCE, -std=gnu99]
+  Add: [-m32, -D_GNU_SOURCE, -D_FILE_OFFSET_BITS=64, -std=gnu99]

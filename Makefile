@@ -1,7 +1,7 @@
 # gtashell: 32-bit x86 Linux. Build with scripts/build-shell.sh (Debian i386
 # container, glibc 2.36) for the Mini; the result also runs on a PC directly.
 CC ?= gcc
-CFLAGS = -m32 -std=gnu99 -O2 -g -D_GNU_SOURCE -Wall -Wextra -Wno-unused-parameter \
+CFLAGS = -m32 -std=gnu99 -O2 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -Wall -Wextra -Wno-unused-parameter \
 	-fno-strict-aliasing -fno-omit-frame-pointer -fno-pie \
 	-mincoming-stack-boundary=2
 LDFLAGS = -m32 -no-pie
