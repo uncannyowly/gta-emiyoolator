@@ -115,9 +115,23 @@ gdb); on the Mini it runs under box86, which runs libc natively.
       + shortcut `Roms/PORTS/Shortcuts/Action/Grand Theft Auto (Original).port`
       + box art. Own GTADATA copy (the game writes PLAYER_A.DAT); music read
       from `../GTA1/Music`. The GTA1 port's files and save were not touched.
-- [ ] **First run on the device** — speed and memory unknown until the user
-      runs it. Logs to read afterwards: `GTA1-Original/launch.log` (box86 +
-      meminfo) and `GTA1-Original/gtashell.log` (fps every 5 s).
+- [x] **First run on the device (0.1.0, 2026-10-19):** user: "absolutely
+      playable and looks fine and plays fine". Log: steady 23.3 fps (the
+      original's pace), 72 MB available before start, swap untouched. Box86
+      segfaults *after* the game exits cleanly (exit code 139 after "exe exited
+      with code 0") — harmless so far, look at it (timer thread join or fb restore).
+      Device logs are copied to ignored `build/hw-logs/`.
+- [x] **Direct 8-way walking (0.2.0)**, user request ("so I don't have to
+      constantly hold UP and DOWN"): `src/input.c` `steer()`. On foot in a level
+      the D-pad is a direction; the shell reads the facing and holds the game's
+      own Turn Left/Right (registry controls 0/1) until within 24 units, and
+      Forwards (control 2) while within ±128. Game memory used: local player
+      index `[0x74f83c]`, player record `0x74f148 + 444*i` (+2 ped id, +0xbc
+      2 = on foot / 0 = in car), peds `0x7284e0 + 256*id` (+0xa8 facing 0..1023,
+      0 south, 256 east, Turn Right decreases it ~48 per frame; +0x90/+0x94
+      position, 16.16 with 64 units per block in the high word). "In a level" =
+      DirectDraw primary has a flip chain (`ddraw_in_level`). `watch = 1|2` in
+      the ini logs these fields for further research.
 - [ ] Sound and music (Miles samples/streams are silent stubs: samples report
       done at once, streams "play" until closed). Plan: own mixer in gtashell +
       SDL 1.2 audio (box86 wraps the card's native `miyoo/lib/libSDL-1.2.so.0`).
