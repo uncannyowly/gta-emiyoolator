@@ -216,6 +216,10 @@ int video_init(void)
 void video_present(const void *pixels, int pitch, int w, int h, int bpp, const uint32_t *palette)
 {
 	static uint32_t last_ms, count;
+	const uint32_t *overview = mapview_frame();
+	if (overview) {
+		pixels = overview; pitch = 640 * 4; w = 640; h = 480; bpp = 32; palette = NULL;
+	}
 	presented++;
 	dump(pixels, pitch, w, h, bpp, palette);
 	if (backend == V_FBDEV)

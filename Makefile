@@ -8,7 +8,7 @@ LDFLAGS = -m32 -no-pie
 LIBS = -ldl -lpthread -lm
 
 SRC = src/main.c src/pe.c src/files.c src/kernel32.c src/user32.c src/misc.c src/mss32.c \
-	src/ddraw.c src/wdir.c src/video.c src/input.c
+	src/ddraw.c src/wdir.c src/video.c src/input.c src/mapview.c
 OBJ = $(SRC:src/%.c=build/shell/%.o)
 
 all: build/gtashell

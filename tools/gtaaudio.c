@@ -8,6 +8,8 @@
  * Based on the MI_AO code of ../gta1-miyoo (src/platform/platform_miyoo.c).
  */
 #include <dlfcn.h>
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,13 +32,26 @@ static MI_S32 (*p_MI_AO_EnableChn)(MI_AUDIO_DEV, MI_AO_CHN);
 static MI_S32 (*p_MI_AO_DisableChn)(MI_AUDIO_DEV, MI_AO_CHN);
 static MI_S32 (*p_MI_AO_SendFrame)(MI_AUDIO_DEV, MI_AO_CHN, MI_AUDIO_Frame_t *, MI_S32);
 static MI_S32 (*p_MI_AO_SetVolume)(MI_AUDIO_DEV, MI_S32);
+static MI_S32 (*p_MI_AO_GetVolume)(MI_AUDIO_DEV, MI_S32 *);
+static MI_S32 (*p_MI_AO_SetMute)(MI_AUDIO_DEV, MI_BOOL);
+static MI_S32 (*p_MI_AO_GetMute)(MI_AUDIO_DEV, MI_BOOL *);
 
-/* OnionOS keeps the volume (0..20) in /appconfigs/system.json */
+/* Match Onion's logarithmic volume curve, not a linear dB ramp.
+ * https://github.com/OnionUI/Onion/blob/main/src/common/system/volume.h
+ * /appconfigs is the firmware fallback; Onion keeps settings on the card. */
+static int volume_db(int vol)
+{
+	if (vol < 0) vol = 0;
+	if (vol > 20) vol = 20;
+	return vol == 0 ? -60 : (int)lround(48.0 * log10(1.0 + vol)) - 60;
+}
+
 static int system_volume_db(void)
 {
 	char buf[2048];
-	FILE *f = fopen("/appconfigs/system.json", "r");
+	FILE *f = fopen("/mnt/SDCARD/system.json", "r");
 	int vol = 10;
+	if (!f) f = fopen("/appconfigs/system.json", "r");
 	if (f) {
 		size_t n = fread(buf, 1, sizeof buf - 1, f);
 		char *v;
@@ -46,9 +61,7 @@ static int system_volume_db(void)
 		if (v && (v = strchr(v, ':')))
 			vol = atoi(v + 1);
 	}
-	if (vol < 0) vol = 0;
-	if (vol > 20) vol = 20;
-	return vol == 0 ? -60 : vol * 3 - 60;
+	return volume_db(vol);
 }
 
 static void *load(const char *name)
@@ -66,7 +79,8 @@ static int mi_ao_open(void)
 {
 	void *sys, *ao;
 	MI_AUDIO_Attr_t attr;
-	MI_S32 e1, e2, e3;
+	MI_S32 e1, e2, e3, vol = -99;
+	MI_BOOL mute = FALSE;
 
 	/* libmi_ao uses symbols of SigmaStar's OS wrapper without linking it */
 	load("libcam_os_wrapper.so");
@@ -85,6 +99,9 @@ static int mi_ao_open(void)
 	p_MI_AO_DisableChn = (MI_S32 (*)(MI_AUDIO_DEV, MI_AO_CHN))dlsym(ao, "MI_AO_DisableChn");
 	p_MI_AO_SendFrame = (MI_S32 (*)(MI_AUDIO_DEV, MI_AO_CHN, MI_AUDIO_Frame_t *, MI_S32))dlsym(ao, "MI_AO_SendFrame");
 	p_MI_AO_SetVolume = (MI_S32 (*)(MI_AUDIO_DEV, MI_S32))dlsym(ao, "MI_AO_SetVolume");
+	p_MI_AO_GetVolume = (MI_S32 (*)(MI_AUDIO_DEV, MI_S32 *))dlsym(ao, "MI_AO_GetVolume");
+	p_MI_AO_SetMute = (MI_S32 (*)(MI_AUDIO_DEV, MI_BOOL))dlsym(ao, "MI_AO_SetMute");
+	p_MI_AO_GetMute = (MI_S32 (*)(MI_AUDIO_DEV, MI_BOOL *))dlsym(ao, "MI_AO_GetMute");
 	if (!p_MI_SYS_Init || !p_MI_AO_SetPubAttr || !p_MI_AO_Enable || !p_MI_AO_EnableChn || !p_MI_AO_SendFrame) {
 		fprintf(stderr, "gtaaudio: MI_AO library lacks functions\n");
 		return -1;
@@ -106,9 +123,18 @@ static int mi_ao_open(void)
 		        (unsigned)e1, (unsigned)e2, (unsigned)e3);
 		return -1;
 	}
-	if (p_MI_AO_SetVolume)
-		p_MI_AO_SetVolume(AO_DEV, system_volume_db());
-	fprintf(stderr, "gtaaudio: MI_AO at %d Hz\n", RATE);
+	vol = system_volume_db();
+	mute = vol <= -60 || access("/mnt/SDCARD/.tmp_update/config/.muteVolume", F_OK) == 0;
+	if (p_MI_AO_SetVolume && p_MI_AO_SetVolume(AO_DEV, vol) != 0)
+		fprintf(stderr, "gtaaudio: could not set volume\n");
+	if (p_MI_AO_SetMute && p_MI_AO_SetMute(AO_DEV, mute) != 0)
+		fprintf(stderr, "gtaaudio: could not set mute\n");
+	/* what the driver reports, for launch.log: the speaker level the game gets */
+	if (p_MI_AO_GetVolume && p_MI_AO_GetVolume(AO_DEV, &vol) != 0)
+		vol = -99;
+	if (p_MI_AO_GetMute && p_MI_AO_GetMute(AO_DEV, &mute) != 0)
+		mute = FALSE;
+	fprintf(stderr, "gtaaudio: MI_AO at %d Hz, volume %d dB%s\n", RATE, (int)vol, mute ? ", muted" : "");
 	return 0;
 }
 
@@ -118,6 +144,7 @@ static int read_full(void *buf, size_t n)
 	size_t got = 0;
 	while (got < n) {
 		ssize_t r = read(0, (char *)buf + got, n - got);
+		if (r < 0 && errno == EINTR) continue;
 		if (r <= 0)
 			return 0;
 		got += (size_t)r;
@@ -130,9 +157,19 @@ int main(void)
 	static int16_t buf[FRAMES * 2];
 	int ao = mi_ao_open() == 0;
 	struct timespec next;
+	unsigned long chunks = 0, active_chunks = 0;
+	int peak = 0;
 
 	clock_gettime(CLOCK_MONOTONIC, &next);
 	while (read_full(buf, sizeof buf)) {
+		chunks++;
+		int active = 0;
+		for (unsigned i = 0; i < FRAMES * 2; i++) {
+			int level = buf[i] < 0 ? -(int)buf[i] : buf[i];
+			if (level > peak) peak = level;
+			active |= level != 0;
+		}
+		active_chunks += active;
 		if (ao) {
 			MI_AUDIO_Frame_t frame;
 			memset(&frame, 0, sizeof frame);
@@ -140,11 +177,23 @@ int main(void)
 			frame.eSoundmode = E_MI_AUDIO_SOUND_MODE_STEREO;
 			frame.u32Len = sizeof buf;
 			frame.apVirAddr[0] = buf;
-			while (p_MI_AO_SendFrame(AO_DEV, AO_CHN, &frame, 100) != 0)
+			MI_S32 error = 0;
+			int tries;
+			for (tries = 0; tries < 20; tries++) {
+				error = p_MI_AO_SendFrame(AO_DEV, AO_CHN, &frame, 100);
+				if (!error) break;
 				usleep(2000);
+			}
+			if (error) {
+				fprintf(stderr, "gtaaudio: SendFrame failed repeatedly (%#x); draining audio\n", (unsigned)error);
+				if (p_MI_AO_DisableChn) p_MI_AO_DisableChn(AO_DEV, AO_CHN);
+				if (p_MI_AO_Disable) p_MI_AO_Disable(AO_DEV);
+				ao = 0;
+				clock_gettime(CLOCK_MONOTONIC, &next);
+			}
 		} else {
 			/* no device: keep real-time pace so the game's music timing holds */
-			next.tv_nsec += 1000000000L / RATE * FRAMES;
+			next.tv_nsec += (long)(1000000000LL * FRAMES / RATE);
 			while (next.tv_nsec >= 1000000000L) {
 				next.tv_nsec -= 1000000000L;
 				next.tv_sec++;
@@ -156,5 +205,7 @@ int main(void)
 		if (p_MI_AO_DisableChn) p_MI_AO_DisableChn(AO_DEV, AO_CHN);
 		if (p_MI_AO_Disable) p_MI_AO_Disable(AO_DEV);
 	}
+	fprintf(stderr, "gtaaudio: played %.1f s, non-silent %.1f s, PCM peak %d/32768\n",
+	        chunks * FRAMES / (double)RATE, active_chunks * FRAMES / (double)RATE, peak);
 	return 0;
 }

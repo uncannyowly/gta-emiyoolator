@@ -12,12 +12,36 @@ Buttons (change them in gtashell.ini):
   D-pad   on foot: walk the way you press (8 directions); in a car: steer,
           accelerate, brake/reverse (direct = 0 in gtashell.ini restores the
           original "rotate" controls on foot)
-  A       attack                B   brake / handbrake
+  A       on foot: attack; in a car: accelerate
+  B       on foot: original brake action; in a car: brake / reverse
   Y       enter/exit vehicle, menu select
-  X       special               L1/R1  previous/next weapon
-  START   Enter (menus)         SELECT Esc (back, quit menu)
-  MENU + START held: quit to OnionOS
+  X       on foot: special; in a car: handbrake
+  L2      on foot: pause (P); in a car: special (horn / RC action)
+  L1/R1   previous/next weapon (the original game selects the car radio)
+  START   original pause / level-info screen (F6); Enter in the front end
+  SELECT  city overview; press SELECT again to close
+  MENU + SELECT   Esc (back / quit confirmation)
+  MENU alone is reserved for Onion. Y selects menu items.
+  car_buttons = 0 restores the older car button mapping.
+  Holding Up and A together keeps accelerating until both are released.
 
 Sound and music play through gtaaudio (the Mini speaker / headphones, at
-OnionOS's volume). Not yet: the intro movie.
+OnionOS's logarithmic volume setting, including mute). As in the original, the menus have no music, only their
+sounds: START/Y, Left/Right on the character, and a tyre squeal on
+MENU + SELECT (Esc). Music is the car radio.
+Not yet: the intro movie.
 Logs after each run: launch.log and gtashell.log in this folder.
+
+Version 0.4.0 fixes the overly quiet startup volume and skipped samples in
+mono/8-bit WAV streams. launch.log now includes non-silent playback time
+and the PCM peak to help diagnose missing sound.
+
+PROGRESS AND MAP (0.4.1)
+The original game records completed-stage progress, not individual missions
+or your current position. Finish the stage's score objective and its ending;
+use the same character next time to access the stages you have unlocked.
+START shows the original pause screen and target score; it has no manual
+Save option. Player-profile writes are synced to the card and logged.
+The city overview is generated from your CMP map, with north at the top.
+Opening it pauses play; closing it preserves an already paused game.
+On a desktop keyboard, M opens/closes the overview and F6 pauses/resumes.

@@ -208,7 +208,10 @@ static int stream_refill(Stream *s)
 			s->loops--;
 		s->pos = 0;
 	}
-	want = (int)((s->data_len - s->pos) < sizeof raw ? (s->data_len - s->pos) : sizeof raw);
+	/* buf holds 2048 stereo frames, regardless of the file's channels/bits.
+	 * Reading 8192 bytes unconditionally skipped most mono/8-bit audio. */
+	want = 2048 * bpf;
+	if ((DWORD)want > s->data_len - s->pos) want = (int)(s->data_len - s->pos);
 	want -= want % bpf;
 	if (want <= 0 || fseek(s->f, s->data_start + (long)s->pos, SEEK_SET) != 0)
 		return 0;
@@ -304,7 +307,7 @@ static void *mix_loop(void *arg)
 			}
 		} else {
 			/* no player to pace us: keep real time */
-			next.tv_nsec += 1000000000L / RATE * MIX_FRAMES;
+			next.tv_nsec += (long)(1000000000LL * MIX_FRAMES / RATE);
 			while (next.tv_nsec >= 1000000000L) {
 				next.tv_nsec -= 1000000000L;
 				next.tv_sec++;
@@ -558,6 +561,7 @@ static void WINAPI ail_set_stream_position(Stream *s, LONG pos)
 	s->pos = pos < 0 ? 0 : (DWORD)pos > s->data_len ? s->data_len : (DWORD)pos;
 	s->pos -= s->pos % (DWORD)(s->channels * s->bits / 8);
 	s->buf_frames = s->buf_pos = 0;
+	s->frac = 0;
 	pthread_mutex_unlock(&mix_lock);
 }
 

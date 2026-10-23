@@ -28,7 +28,7 @@ static DWORD last_error;
 
 enum { H_FREE, H_FILE, H_STD, H_MUTEX, H_FIND };
 #define MAX_HANDLES 128
-static struct { int kind, fd; } handles[MAX_HANDLES];
+static struct { int kind, fd, dirty, profile; DWORD written; } handles[MAX_HANDLES];
 
 static HANDLE handle_new(int kind, int fd)
 {
@@ -36,6 +36,8 @@ static HANDLE handle_new(int kind, int fd)
 		if (handles[i].kind == H_FREE) {
 			handles[i].kind = kind;
 			handles[i].fd = fd;
+			handles[i].dirty = handles[i].profile = 0;
+			handles[i].written = 0;
 			return (HANDLE)(uintptr_t)(0x100 + 4 * i);
 		}
 	return INVALID_HANDLE_VALUE;
@@ -357,7 +359,12 @@ static HANDLE WINAPI k32_CreateFileA(const char *name, DWORD access, DWORD share
 		return INVALID_HANDLE_VALUE;
 	}
 	last_error = 0;
-	return handle_new(H_FILE, fd);
+	mapview_load(host);
+	HANDLE handle = handle_new(H_FILE, fd);
+	int index = handle_index(handle);
+	const char *base = strrchr(host, '/'); base = base ? base + 1 : host;
+	if (index >= 0) handles[index].profile = !strncasecmp(base, "PLAYER_", 7);
+	return handle;
 }
 
 static BOOL WINAPI k32_ReadFile(HANDLE h, void *buf, DWORD n, DWORD *got, void *ov)
@@ -381,6 +388,11 @@ static BOOL WINAPI k32_WriteFile(HANDLE h, const void *buf, DWORD n, DWORD *put,
 	if (fd < 0)
 		return FALSE;
 	r = write(fd, buf, n);
+	int index = handle_index(h);
+	if (r > 0 && index >= 0 && handles[index].kind == H_FILE) {
+		handles[index].dirty = 1;
+		handles[index].written += (DWORD)r;
+	}
 	if (put)
 		*put = r < 0 ? 0 : (DWORD)r;
 	return r >= 0;
@@ -404,18 +416,32 @@ static BOOL WINAPI k32_SetEndOfFile(HANDLE h)
 	return fd >= 0 && ftruncate(fd, lseek(fd, 0, SEEK_CUR)) == 0;
 }
 
-static BOOL WINAPI k32_FlushFileBuffers(HANDLE h) { (void)h; return TRUE; }
+static BOOL WINAPI k32_FlushFileBuffers(HANDLE h)
+{
+	int fd = handle_fd(h);
+	if (fd < 0) { last_error = 6; return FALSE; }
+	if (fsync(fd) != 0) { last_error = 29; return FALSE; }
+	return TRUE;
+}
 
 static BOOL WINAPI k32_CloseHandle(HANDLE h)
 {
 	int i = handle_index(h);
 	if (i < 0)
 		return FALSE;
-	if (handles[i].kind == H_FILE && handles[i].fd >= 0)
-		close(handles[i].fd);
+	int ok = 1;
+	if (handles[i].kind == H_FILE && handles[i].fd >= 0) {
+		if (handles[i].dirty && fsync(handles[i].fd) != 0) {
+			shell_log("file: sync failed%s: %s", handles[i].profile ? " for player progress" : "", strerror(errno));
+			last_error = 29; ok = 0;
+		}
+		if (handles[i].profile && handles[i].dirty && ok)
+			shell_log("progress: player profile wrote %u bytes and synced to disk", handles[i].written);
+		if (close(handles[i].fd) != 0) { last_error = 29; ok = 0; }
+	}
 	if (handles[i].kind != H_STD)
 		handles[i].kind = H_FREE;
-	return TRUE;
+	return ok;
 }
 
 /* WIN32_FIND_DATAA: attributes, three FILETIMEs, size high/low, two reserved, name[260], alt[14] */

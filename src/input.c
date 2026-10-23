@@ -5,8 +5,10 @@
  * or "<ms> quit". Miyoo button mapping (ini key = scan code, hex allowed):
  *   up/down/left/right: arrows      a: Ctrl (Attack)     b: Space (Brake)
  *   y: Enter (Enter/Exit vehicle, menu select)           x: Tab (Special)
- *   l1: Z (Previous weapon)   r1: X (Next weapon)        start: Enter
- *   select: Esc   l2: P   r2: Delete   menu+start held: quit the shell
+ *   l1: Z (Previous weapon)   r1: X (Next weapon)        start: F6 (Enter outside levels)
+ *   select: city map   l2: P   r2: Delete   MENU+SELECT: Esc
+ * car_buttons = 1 adds contextual A/B/X/L2: forwards/backwards/brake/special.
+ * <button>_car can override the scan code for any button while in a car.
  */
 #include "shell.h"
 
@@ -38,6 +40,7 @@ int ddraw_in_level(void);
 
 static int pad_scan[4];        /* up, down, left, right as configured */
 static int dpad[4];
+static uint8_t raw_held[0x200], wanted[0x200];
 static uint8_t sent[0x200];    /* key state we have given the game */
 
 static void send_key(int sc, int down)
@@ -56,76 +59,84 @@ static int dik_to_scan(int dik)
 
 static int control_scan(int n)
 {
-	static const int defaults[3] = { 0xCB, 0xCD, 0xC8 };   /* turn left, turn right, forwards */
+	static const int defaults[10] = { 0xCB, 0xCD, 0xC8, 0xD0, 0x39, 0x1C, 0x1D, 0x2D, 0x2C, 0x0F };
 	char key[16];
 	snprintf(key, sizeof key, "control%d", n);
 	return dik_to_scan(config_int(key, defaults[n]));
 }
 
-/* the local player's ped when on foot in a level, else NULL */
+/* A validated local player record in a level, else NULL. */
+static const uint8_t *local_player(void)
+{
+	uint32_t index;
+	if (!ddraw_in_level()) return NULL;
+	index = *(const uint32_t *)0x74f83c;
+	if (index > 3) return NULL;
+	return (const uint8_t *)(uintptr_t)(0x74f148 + 444 * index);
+}
+
+/* The local player's ped when on foot, else NULL. */
 static const uint8_t *foot_ped(void)
 {
 	const uint8_t *player;
 	int16_t id;
-	uint32_t index = *(const uint32_t *)0x74f83c;
-	if (!ddraw_in_level() || index > 3)
-		return NULL;
-	player = (const uint8_t *)(uintptr_t)(0x74f148 + 444 * index);
+	player = local_player();
+	if (!player) return NULL;
 	id = *(const int16_t *)(player + 2);
 	if (*(const int32_t *)(player + 0xbc) != 2 || id < 0 || id >= 1024)
 		return NULL;
 	return (const uint8_t *)(uintptr_t)(0x7284e0 + 256 * id);
 }
 
+/* Combine all sources before sending edges. Aliases (A + Up, Y + Start)
+ * must stay held until every physical source is released. */
+static void want_key(int scan, int down)
+{
+	if (scan > 0 && scan < 0x200 && down) wanted[scan] = 1;
+}
+
+static void collect_buttons(void);
+
 static void steer(void)
 {
 	const uint8_t *ped = config_int("direct", 1) ? foot_ped() : NULL;
 	int left = control_scan(0), right = control_scan(1), fwd = control_scan(2);
-	int dx = dpad[3] - dpad[2], dy = dpad[1] - dpad[0];
-
-	if (!ped) {
-		/* pass through: what the buttons say, nothing else */
-		if (!dpad[2] && left != pad_scan[2]) send_key(left, 0);
-		if (!dpad[3] && right != pad_scan[3]) send_key(right, 0);
-		if (!dpad[0] && fwd != pad_scan[0]) send_key(fwd, 0);
-		for (int i = 0; i < 4; i++)
-			send_key(pad_scan[i], dpad[i]);
-		return;
+	int dx, dy;
+	memcpy(wanted, raw_held, sizeof wanted);
+	collect_buttons();
+	if (mapview_active()) memset(wanted, 0, sizeof wanted);
+	for (int i = 0; i < 4; i++) {
+		dpad[i] = pad_scan[i] > 0 && pad_scan[i] < 0x200 ? wanted[pad_scan[i]] : 0;
+		if (ped && pad_scan[i] > 0 && pad_scan[i] < 0x200) wanted[pad_scan[i]] = 0;
 	}
-	for (int i = 0; i < 4; i++)
-		if (pad_scan[i] != left && pad_scan[i] != right && pad_scan[i] != fwd)
-			send_key(pad_scan[i], 0);
-	if (!dx && !dy) {
-		send_key(left, 0);
-		send_key(right, 0);
-		send_key(fwd, 0);
-		return;
-	}
-	{
-		static const int16_t dir[3][3] = {   /* [dy+1][dx+1]: 0 south, 256 east, 512 north, 768 west */
+	dx = dpad[3] - dpad[2];
+	dy = dpad[1] - dpad[0];
+	if (ped && !mapview_active() && (dx || dy)) {
+		static const int16_t dir[3][3] = {
 			{ 640, 512, 384 }, { 768, -1, 256 }, { 896, 0, 128 },
 		};
 		int want = dir[dy + 1][dx + 1];
 		int face = *(const int16_t *)(ped + 0xa8) & 1023;
-		int diff = ((want - face + 512) & 1023) - 512;   /* -512..511, > 0: turn left */
+		int diff = ((want - face + 512) & 1023) - 512;
 		int tol = config_int("direct_tolerance", 24);
-		send_key(left, diff > tol);
-		send_key(right, diff < -tol);
-		/* walk once roughly facing the way: no wide arcs, no stalling */
-		send_key(fwd, diff >= -128 && diff <= 128);
+		want_key(left, diff > tol);
+		want_key(right, diff < -tol);
+		want_key(fwd, diff >= -128 && diff <= 128);
 	}
+	for (int sc = 1; sc < 0x200; sc++) send_key(sc, wanted[sc]);
 }
 
-/* every key from a device or script goes through here */
+static int map_key_held;
+
+/* Desktop/script keys retain their configured PC meanings, except M for the map. */
 static void pad_key(int sc, int down)
 {
-	for (int i = 0; i < 4; i++)
-		if (sc == pad_scan[i]) {
-			dpad[i] = down;
-			steer();
-			return;
-		}
-	user32_key_event(sc, down);
+	if (sc == config_int("map_key", 0x32)) {
+		if (!down && map_key_held) mapview_toggle();
+		map_key_held = down != 0;
+		return;
+	}
+	if (sc > 0 && sc < 0x200) raw_held[sc] = down != 0;
 }
 
 /* ---- Miyoo buttons ------------------------------------------------------------- */
@@ -134,11 +145,69 @@ static const struct { int code; const char *name; int def; } buttons[] = {
 	{ KEY_UP, "up", 0x148 }, { KEY_DOWN, "down", 0x150 }, { KEY_LEFT, "left", 0x14B }, { KEY_RIGHT, "right", 0x14D },
 	{ KEY_SPACE, "a", 0x1D }, { KEY_LEFTCTRL, "b", 0x39 }, { KEY_LEFTSHIFT, "x", 0x0F }, { KEY_LEFTALT, "y", 0x1C },
 	{ KEY_E, "l1", 0x2C }, { KEY_T, "r1", 0x2D }, { KEY_TAB, "l2", 0x19 }, { KEY_BACKSPACE, "r2", 0x153 },
-	{ KEY_RIGHTCTRL, "select", 0x01 }, { KEY_ENTER, "start", 0x1C }, { KEY_ESC, "menu", 0x01 },
+	{ KEY_RIGHTCTRL, "select", 0 }, { KEY_ENTER, "start", 0x40 }, { KEY_ESC, "menu", 0 },
 };
 #define NBUTTONS (int)(sizeof buttons / sizeof buttons[0])
-static int button_scan[NBUTTONS];
-static int menu_held, start_held;
+static int button_scan[NBUTTONS], button_down[NBUTTONS];
+
+static void collect_buttons(void)
+{
+	const uint8_t *player = local_player();
+	int car = player && *(const int32_t *)(player + 0xbc) == 0;
+	for (int b = 0; b < NBUTTONS; b++) {
+		int scan = button_scan[b];
+		if (config_int("menu_controls", 1) &&
+		    (buttons[b].code == KEY_ESC || buttons[b].code == KEY_RIGHTCTRL || buttons[b].code == KEY_ENTER))
+			continue;
+		/* Context mapping can be disabled to keep the original button layout.
+		 * Override a single in-car button with e.g. a_car = 0x148. */
+		if (car && config_int("car_buttons", 1)) {
+			char key[32];
+			if (buttons[b].code == KEY_SPACE) scan = control_scan(2);
+			if (buttons[b].code == KEY_LEFTCTRL) scan = control_scan(3);
+			if (buttons[b].code == KEY_LEFTSHIFT) scan = control_scan(4);
+			if (buttons[b].code == KEY_TAB) scan = control_scan(9);
+			snprintf(key, sizeof key, "%s_car", buttons[b].name);
+			scan = config_int(key, scan);
+		}
+		want_key(scan, button_down[b]);
+	}
+}
+static int menu_held, select_held, select_consumed, escape_latched;
+
+static void pulse_key(int scan)
+{
+	user32_key_event(scan, 1);
+	user32_key_event(scan, 0);
+}
+
+static void device_key(int code, int down)
+{
+	int was = 0;
+	for (int b = 0; b < NBUTTONS; b++) if (buttons[b].code == code) {
+		was = button_down[b];
+		button_down[b] = down != 0;
+	}
+	if (!config_int("menu_controls", 1)) return;
+	if (code == KEY_ESC) menu_held = down;
+	if (code == KEY_RIGHTCTRL) select_held = down;
+	/* Latch until both keys are released. SELECT acts on release so either
+	 * chord order sends only Esc, never a map flash or an unwanted pause. */
+	if (menu_held && select_held && !escape_latched) {
+		escape_latched = select_consumed = 1;
+		mapview_close();
+		pulse_key(config_int("escape", 0x01));
+	}
+	if (code == KEY_RIGHTCTRL && !down && was) {
+		if (!select_consumed && !menu_held) mapview_toggle();
+		if (!menu_held) select_consumed = 0;
+	}
+	if (!menu_held && !select_held) escape_latched = select_consumed = 0;
+	if (code == KEY_ENTER && down && !was && !menu_held) {
+		mapview_close();
+		pulse_key(ddraw_in_level() ? config_int("start", 0x40) : config_int("start_menu", 0x1c));
+	}
+}
 
 static int evdev_poll(void)
 {
@@ -148,15 +217,7 @@ static int evdev_poll(void)
 		for (int k = 0; k < (int)(n / (ssize_t)sizeof ev[0]); k++) {
 			if (ev[k].type != EV_KEY || ev[k].value == 2)   /* ignore autorepeat */
 				continue;
-			if (ev[k].code == KEY_ESC)
-				menu_held = ev[k].value;
-			if (ev[k].code == KEY_ENTER)
-				start_held = ev[k].value;
-			if (menu_held && start_held)
-				return 1;
-			for (int b = 0; b < NBUTTONS; b++)
-				if (buttons[b].code == ev[k].code && button_scan[b] > 0)
-					pad_key(button_scan[b], ev[k].value != 0);
+			device_key(ev[k].code, ev[k].value != 0);
 		}
 	}
 	return 0;
@@ -308,11 +369,11 @@ static void watch(void)
 int input_poll(void)
 {
 	watch();
-	steer();
 	int quit = script_poll();
 	if (backend == I_EVDEV)
 		quit |= evdev_poll();
 	else if (backend == I_SDL2)
 		quit |= sdl2_poll();
+	steer();
 	return quit;
 }

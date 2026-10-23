@@ -215,7 +215,7 @@ __asm__(".text\n"
         "\tpop %edx\n\tpop %ecx\n\tpop %eax\n\tret\n");
 extern char wait_ticks_stub[];
 
-static void patch_exe(void)
+static void patch_spin(void)
 {
 	static const uint8_t spin[8] = { 0x39, 0x05, 0x80, 0x55, 0x77, 0x00, 0x72, 0xF8 };
 	uint8_t *p = image_base + (0x47dc96 - IMAGE_BASE);
@@ -231,6 +231,32 @@ static void patch_exe(void)
 	memcpy(p + 1, &rel, 4);
 	p[5] = p[6] = p[7] = 0x90;
 	shell_log("pe: frame limiter sleeps instead of spinning");
+}
+
+/* After reading PLAYER_A.DAT, 0x414c70 sets the screen mode to index 6 (its
+ * default for a Windows mode list) when the saved byte is below the mode
+ * count, else 0: "setge dl; dec dl; and edx, 6". The game keeps only 15, 16
+ * and 32 bpp 4:3 or 16:10 modes, so ours has two entries (ddraw.c). Once
+ * the game had written its own PLAYER_A.DAT (mode 0), every level start
+ * crashed in 0x414cc0 on the missing entry 6. The default becomes 0, our
+ * 640x480x16. */
+static void patch_mode(void)
+{
+	static const uint8_t code[14] = { 0x0F, 0x9D, 0xC2, 0xFE, 0xCA, 0x83, 0xE2, 0x06,
+	                                  0x88, 0x15, 0x24, 0x32, 0x50, 0x00 };
+	uint8_t *p = image_base + (0x414ca6 - IMAGE_BASE);
+	if (memcmp(p, code, sizeof code) != 0) {
+		shell_log("pe: screen mode default not where expected, left as it is");
+		return;
+	}
+	p[7] = 0;
+	shell_log("pe: default screen mode is 640x480x16");
+}
+
+static void patch_exe(void)
+{
+	patch_spin();
+	patch_mode();
 }
 
 uint32_t pe_entry(void)

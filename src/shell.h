@@ -116,6 +116,12 @@ int video_init(void);
 void video_present(const void *pixels, int pitch, int w, int h, int bpp, const uint32_t *palette);
 void video_shutdown(void);
 
+void mapview_load(const char *path);
+int mapview_active(void);
+void mapview_toggle(void);
+void mapview_close(void);
+const uint32_t *mapview_frame(void);
+
 void input_init(void);
 /* reads pending device events and posts key messages; returns 1 on quit */
 int input_poll(void);

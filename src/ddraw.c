@@ -600,6 +600,7 @@ static HRESULT WINAPI dd_DuplicateSurface(Obj *o, Surf *s, Surf **out) { (void)o
 static HRESULT WINAPI dd_EnumDisplayModes(Obj *o, DWORD flags, const uint8_t *filter, void *ctx,
                                           HRESULT (WINAPI *cb)(uint8_t *, void *))
 {
+	/* the game drops 8 bpp modes: its list is 640x480x16 (index 0, pe.c patch_mode), 640x480x32 */
 	static const int modes[][3] = { { 320, 200, 8 }, { 320, 240, 8 }, { 640, 480, 8 }, { 640, 480, 16 }, { 640, 480, 32 } };
 	(void)o; (void)flags; (void)filter;
 	for (unsigned i = 0; i < sizeof modes / sizeof modes[0]; i++) {
