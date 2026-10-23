@@ -1,1 +1,4 @@
 build/
+dist/
+# crash dumps hold the game's memory, so never commit them
+*.core

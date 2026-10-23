@@ -3,7 +3,8 @@
 #   scripts/deploy-sd.sh /run/media/$USER/CARD "/path/to/Grand Theft Auto"
 # Copies box86, gtashell and the launcher into Roms/PORTS/Games/GTA1-Original,
 # the original exe from the given install, GTADATA once (from the GTA1 port's
-# folder on the card if present, else from the install), the Ports shortcut
+# folder on the card if present, else from the install), Music once (unless the
+# GTA1 port has it: then a new gtashell.ini reads that copy), the Ports shortcut
 # and box art. Keeps an existing gtashell.ini. Never touches other ports.
 set -eu
 
@@ -39,10 +40,25 @@ if [ ! -d "$DEST/GTADATA" ]; then
 	fi
 fi
 
-mkdir -p "$SD/Roms/PORTS/Shortcuts/Action"
+if [ -d "$SD/Roms/PORTS/Games/GTA1/Music" ]; then
+	for ini in "$DEST/gtashell.ini" "$DEST/gtashell.ini.new"; do
+		if [ -f "$ini" ]; then
+			sed -i 's|^music = Music$|music = /mnt/SDCARD/Roms/PORTS/Games/GTA1/Music|' "$ini"
+		fi
+	done
+elif [ ! -d "$DEST/Music" ] && [ -d "$INSTALL/Music" ]; then
+	cp -r "$INSTALL/Music" "$DEST/Music"
+fi
+
+mkdir -p "$SD/Roms/PORTS/Shortcuts/Action" "$SD/Roms/PORTS/Imgs"
 cp -f "$ROOT/packaging/Grand Theft Auto (Original).port" "$SD/Roms/PORTS/Shortcuts/Action/"
-if [ -f "$SD/Roms/PORTS/Imgs/Grand Theft Auto.png" ] && [ ! -f "$SD/Roms/PORTS/Imgs/Grand Theft Auto (Original).png" ]; then
-	cp "$SD/Roms/PORTS/Imgs/Grand Theft Auto.png" "$SD/Roms/PORTS/Imgs/Grand Theft Auto (Original).png"
+ART="$SD/Roms/PORTS/Imgs/Grand Theft Auto (Original).png"
+if [ ! -f "$ART" ]; then
+	if [ -f "$SD/Roms/PORTS/Imgs/Grand Theft Auto.png" ]; then
+		cp "$SD/Roms/PORTS/Imgs/Grand Theft Auto.png" "$ART"
+	else
+		cp "$ROOT/packaging/Imgs/Grand Theft Auto (Original).png" "$ART"
+	fi
 fi
 sync
 echo "installed to $DEST"

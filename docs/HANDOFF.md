@@ -1,6 +1,6 @@
 # Handoff: GTA-eMiYoolator
 
-Last updated: 2026-10-19. Keep this file current; it is the notes another agent
+Last updated: 2026-10-23. Keep this file current; it is the notes another agent
 continues from.
 
 ## Goal (the user's words and decision)
@@ -15,15 +15,17 @@ to ARM (M-HT "SR" style), reusing the same Windows-replacement layer.
 `GTA Settings.exe` is replaced, not emulated (see "Settings").
 
 Rules: never commit the user's exe/DLLs/GTADATA/music or anything translated
-from them ("bring your own exe", like ../gta1-miyoo). Commit email is the
-GitHub noreply address (set in this repo's config). The user creates GitHub
-repos on the web; until then this repo is local only.
+from them ("bring your own exe", like ../gta1-miyoo). That includes crash
+dumps: `*.core` files hold the game's memory (two were committed in 0.1.0 by
+mistake; .gitignore now excludes them). Commit email is the GitHub noreply
+address (set in this repo's config). The repo is public on GitHub
+(uncannyowly/gta-emiyoolator, branch `master`); see "Releases".
 
 ## Where things are
 
 | What | Where |
 |---|---|
-| This repo | `/mnt/data/git/MiYoo-Mini/gta-emiyoolator` (local, branch `master`) |
+| This repo | `/mnt/data/git/MiYoo-Mini/gta-emiyoolator` (branch `master`, pushed over SSH to github.com/uncannyowly/gta-emiyoolator) |
 | The clean-room port (kept, parked) | `/mnt/data/git/MiYoo-Mini/gta1-miyoo` |
 | User's GTA1 install | `/mnt/scratch/Games_Wine/drive_c/Games/grand-theft-auto/drive_c/Program Files/Rockstar Games/Grand Theft Auto` (`WINO/Grand Theft Auto.exe`, `GTADATA`, `Music`, `GTA Settings.exe`) |
 | SD card | `/run/media/shoots/E010-96EB` (OnionOS 4.4.0 beta); GTADATA + Music already at `Roms/PORTS/Games/GTA1/` (57 MB + 312 MB) |
@@ -46,6 +48,25 @@ scripts/build-shell.sh      # gtashell (32-bit x86, Debian i386 container) -> bu
 scripts/deploy-sd.sh /run/media/$USER/E010-96EB "/path/to/Grand Theft Auto"
 ```
 
+## Releases
+
+v0.4.1 (2026-10-23) is the first release, asset `gta-emiyoolator-0.4.1.zip`:
+extract to the SD card root (only `Roms/` at the top); players copy WINO,
+GTADATA and Music from their own install into `Roms/PORTS/Games/GTA1-Original`.
+The zip holds box86 (stripped, with `box86-LICENSE.txt`), gtashell, gtaaudio,
+launch.sh, gtashell.ini, README.txt, VERSION, LICENSE.txt, the Ports shortcut
+(`Shortcuts/Action`) and box art (`packaging/Imgs`, cropped from
+`docs/screenshot.png`, so no Rockstar artwork). The packaged gtashell.ini reads
+`Music` next to the game; deploy-sd.sh points a new ini at the GTA1 port's music
+instead when the card has it (not copied again).
+Steps: bump `VERSION`, build (box86, audio, shell), `scripts/test-shell.sh`,
+`scripts/package.sh`, check the zip (no game files; binaries identical to
+`build/`), commit, annotated tag `vX.Y.Z`, push, then create the release and
+upload the zip through the GitHub REST API (no gh CLI here). Release notes:
+what it is, what you need, install/update/remove, controls, known issues,
+tested hardware, the zip's SHA-256. The 0.4.1 binaries rebuilt byte-identical
+from the committed source and match the ones installed on the card.
+
 ## What the exe needs (recon, 2026-10-19)
 
 - `Grand Theft Auto.exe`: 774 KB, `.text` 677 KB, image base 0x400000,
@@ -66,7 +87,7 @@ scripts/deploy-sd.sh /run/media/$USER/E010-96EB "/path/to/Grand Theft Auto"
 - Settings: reads `HKLM\SOFTWARE\DMA Design\Grand Theft Auto` value
   `Language` (DWORD, 0 = English) and `...\Controls` values `Control 0`…
   `Control 9` (DWORD DirectInput scan codes; ≥0x100 joystick buttons,
-  0x140–0x145 joystick axes) — loader at 0x46e820, fatal "Please run
+  0x140-0x145 joystick axes); loader at 0x46e820, fatal "Please run
   'Settings' first" if missing. Order: Turn Left, Turn Right, Forwards,
   Backwards, Brake, Enter/Exit Vehicle, Attack, Next Weapon, Previous Weapon,
   Special. Defaults from `GTA Settings.exe`: 0xCB 0xCD 0xC8 0xD0 0x39 0x1C
@@ -120,7 +141,7 @@ gdb); on the Mini it runs under box86, which runs libc natively.
       playable and looks fine and plays fine". Log: steady 23.3 fps (the
       original's pace), 72 MB available before start, swap untouched. Box86
       segfaults *after* the game exits cleanly (exit code 139 after "exe exited
-      with code 0") — harmless so far, look at it (timer thread join or fb restore).
+      with code 0"): harmless so far, look at it (timer thread join or fb restore).
       Device logs are copied to ignored `build/hw-logs/`.
 - [x] **Direct 8-way walking (0.2.0)**, user request ("so I don't have to
       constantly hold UP and DOWN"): `src/input.c` `steer()`. On foot in a level
@@ -199,7 +220,7 @@ gdb); on the Mini it runs under box86, which runs libc natively.
 
 ## Continuation: 0.4.0 (2026-10-19)
 
-- Read the plugged-in card's latest 0.3.1 logs (16:21–16:27): clean game
+- Read the plugged-in card's latest 0.3.1 logs (16:21-16:27): clean game
   return, audio helper played 381.2 s, startup volume **-51 dB**, no mute
   reported. The box86 exit segfault still follows the clean game exit.
 - **Sound volume fix:** helper incorrectly used `vol * 3 - 60`; Onion uses
@@ -235,7 +256,7 @@ gdb); on the Mini it runs under box86, which runs libc natively.
 - Verification completed: control tests, all four WAV format regressions,
   volume-curve/clamping test, and helper no-device fallback. Native headless
   gameplay reached the car; recorded PCM contains menu effects and substantial
-  in-game audio (14–26 s RMS 8557/32768). ARM/box86 also reached gameplay and
+  in-game audio (14-26 s RMS 8557/32768). ARM/box86 also reached gameplay and
   successfully spawned the native helper (no physical MI_AO in emulation).
   These smoke runs are time-limited; they do not validate the device speaker
   or resolve the already-known box86 exit crash.
@@ -261,7 +282,7 @@ progress**, not mid-mission save states. Do not add a manual save-state system.
   release. SELECT acts on release to avoid accidental map toggles from the
   chord. Removed the old MENU+START quit action. Y still confirms menus.
 - F6 is the original pause / target-score screen, not a custom Save menu.
-  See the original manual: https://gtamp.com/GTA1/gta1manual.pdf (pages 7–11).
+  See the original manual: https://gtamp.com/GTA1/gta1manual.pdf (pages 7-11).
   Original stage-completion progress is automatic and character-specific;
   individual missions/current location are not saved by this executable.
 - `src/mapview.c` reads the user's current CMP (observed via CreateFileA),

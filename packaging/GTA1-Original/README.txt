@@ -5,8 +5,9 @@ This runs the game's own Windows program (WINO/Grand Theft Auto.exe from the
 functions it needs, with box86 translating its x86 code for the Mini's ARM CPU.
 Everything you see is the original game.
 
-Needs, in this folder: WINO/Grand Theft Auto.exe and GTADATA (your own copy of
-the game). Music is read from ../GTA1/Music (see gtashell.ini).
+Needs, in this folder, from your own copy of the game: WINO/Grand Theft
+Auto.exe, GTADATA and Music. Music can live elsewhere: set music in
+gtashell.ini.
 
 Buttons (change them in gtashell.ini):
   D-pad   on foot: walk the way you press (8 directions); in a car: steer,
